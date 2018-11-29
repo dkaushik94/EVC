@@ -12,7 +12,6 @@ from threading import Thread
 from random import randint
 from time import sleep
 from decimal import *
-from numpy.random import choice
 
 
 def EVC(t_id, q, prime, max_size, prec, V):
@@ -100,8 +99,7 @@ def EVC(t_id, q, prime, max_size, prec, V):
                 mode = 0
                 while True:
                     sleep(0.05)
-                    mode = choice([0,1], [0.4, 0.6])
-                    if mode == 0:
+                    if mode%2 == 0:
                         q[t_id].put({
                             'type': "INT"
                         })

@@ -13,7 +13,7 @@ from time import sleep
 from numpy.random import choice
 
 
-def EVC(t_id, q, prime, max_size):
+def EVC(t_id, q, prime, max_size, p1, p2):
     try:
         def gcd(x, y):
             """This function implements the Euclidian algorithm
@@ -28,7 +28,7 @@ def EVC(t_id, q, prime, max_size):
             lcm = (x*y)//gcd(x,y)
             return lcm
 
-        def receive(q, t_id, prime):
+        def receive(q, t_id, prime, p1):
             try:
                 clock = 1
                 events = {
@@ -72,21 +72,21 @@ def EVC(t_id, q, prime, max_size):
                         clock = temp * prime
                         events['bit_length'].append(int(clock).bit_length())
                         events['clock'].append(clock)
-                print(events)
+                # print(events)
                 events['id'] = t_id
-                with open('part1/data_' + str(N) + '_' +str(t_id)+'.json', 'w+') as f:
+                with open('part1/part3/data_' + str(N) + '_' + str(p1) + '_' + str(t_id) +'.json', 'w+') as f:
                     f.write(json.dumps(events))
                 
             except Exception:
                 print(traceback.format_exc())
         
-        def send(q, t_id):
+        def send(q, t_id, p1, p2):
             try:
                 sleep(4)
                 mode = 0
                 while True:
                     sleep(0.05)
-                    mode = choice([0,1], p=[0.25, 0.75])
+                    mode = choice([0,1], p=[p1, p2])
                     if mode == 0:
                         q[t_id].put({
                             'type': "INT"
@@ -99,10 +99,10 @@ def EVC(t_id, q, prime, max_size):
             except Exception:
                 print(traceback.format_exc())
 
-        th = Thread(target = send, args=(q, t_id))
+        th = Thread(target = send, args=(q, t_id, p1, p2))
         th.daemon = True
         th.start()
-        receive(q, t_id, prime)
+        receive(q, t_id, prime, p1)
     except Exception:
         print(traceback.format_exc())
 
@@ -123,8 +123,10 @@ if __name__ == '__main__':
                 if prime:
                     primes.append(num)
                 num += 1
+            # p = [0, 0.25, 0.5, 0.75, 1]
+            i = 1
             for _ in range(N):
-                p = Process(target = EVC, args = ((_, qu, primes[_], N)))
+                p = Process(target = EVC, args = ((_, qu, primes[_], N, i, 1-i)))
                 p.start()
             sleep(10)
     except Exception:
