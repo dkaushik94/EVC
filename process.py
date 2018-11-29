@@ -5,138 +5,138 @@ import os
 import sys
 import traceback
 import json
-import pika
+import math
+
+from multiprocessing import Process, Queue
 from threading import Thread
 from time import sleep
 from random import randint
 
 
-NUM_PROC, PROCESSES = None, []
-
-class Process(Thread):
+NUM_PROC, PROCESSES, SENDERS, KILLED_NODES = None, [], [], 0
+SENDERS2 = []
+class Proc(Process):
 
     def __init__(self, t_id, prime):
-        Thread.__init__(self)
+        Process.__init__(self)
         self.events = {
             "INT_EVNT": 0, 
             "SND_EVNT": 0,
             "RCV_EVNT": 0
         }
-        self.clock_growth = {"event":[], "clock_val": []}
+        self.clock_growth = {"event":[], "clock_val": [], "no_of_bits": []}
         self.t_id = t_id
         self.prime = prime
-        self.clock = self.prime
+        self.clock = 1
         self.channel = None
         self.consumer_tag = None
+        self.i = 0
+        self.queue = Queue()
+        self.kill_self = False
+        self.ev_no = 0
+
+
+    def gcd(self, x, y):
+        """This function implements the Euclidian algorithm
+        to find G.C.D. of two numbers"""
+        while(y):
+            x, y = y, x % y
+        return x
 
 
     def LCM(self, x, y):
-        try:
-            lcm, greater = None, None    
-            if x > y:  
-                greater = x  
-            else:
-                greater = y
+        """This function takes two
+        integers and returns the L.C.M."""
 
-            while True:  
-                if((greater % x == 0) and (greater % y == 0)):  
-                    lcm = greater
-                    break
-                greater += 1
-            return lcm
-        except Exception:
-            print(traceback.format_exc())
+        lcm = (x*y)//self.gcd(x,y)
+        return lcm
 
 
     def update_clock(self, mode, ext_clock = None):
-        if mode == "RCV":
-            self.clock = int(self.LCM(self.clock, ext_clock))
-            self.clock = int(self.clock) * int(self.prime)
-        elif mode == "SND" or mode == "INT":
-            self.clock = self.clock * self.prime
-
+        global NUM_PROC
         if int(self.clock).bit_length() <= 32*NUM_PROC:
-            self.clock_growth["event"].append(sum(self.events.values()))
+            self.ev_no += 1
+            if mode == "RCV":
+                temp = self.LCM(self.clock, ext_clock)
+                self.clock = temp*self.prime
+            elif mode == "SND" or mode == "INT":
+                self.clock = self.clock * self.prime
+            self.clock_growth["event"].append(self.ev_no)
             self.clock_growth["clock_val"].append(self.clock)
+            self.clock_growth["no_of_bits"].append(int(self.clock).bit_length())
             return False
         else:
             return True
+ 
 
-
-    def onRecieve(self, ch, method, properties, body):
+    def onReceive(self, ext_clock):
         try:
-            data = json.loads(body)
-            ext_clock = data["clock"]
             self.events['RCV_EVNT'] += 1
-            self.update_clock("RCV", ext_clock)
-            # print("Message recieved by thread", self.t_id, "clock increased", self.clock)
+            kill_self = self.update_clock("RCV", int(ext_clock))
+            if kill_self:
+                self.kill()
+                return True
+            else:
+                return False
         except Exception:
             print(traceback.format_exc())
 
 
     def run(self):
         try:
-            print("Thread %s Starting to listen.." %(self.t_id))
-            self.initiate_send_events()
-            connection = pika.BlockingConnection(pika.ConnectionParameters("localhost"))
-            self.channel = connection.channel()
-            self.channel.queue_declare(str(self.t_id))
-            self.consumer_tag = self.channel.basic_consume(self.onRecieve, queue = str(self.t_id), no_ack = True)
-            self.channel.start_consuming()
-            connection.close()
-            print(self.t_id, "stopped consuming!")
+            while True:
+                if self.queue.empty() is False:
+                    event = self.queue.get()
+                    flag = self.onReceive(event)
+                    if flag:
+                        global KILLED_NODES
+                        KILLED_NODES += 1
+                        global SENDERS
+                        SENDERS[self.t_id] = True
+                        break
+            print("Killed")
         except Exception:
-            self.kill()
-            print(self.t_id, "Crashed.")
+            print(traceback.format_exc())
 
-
-    def send_message(self):
-        try:
-            kill_self = False
-            while True and not kill_self:
-                choice = randint(0,1)
-                if choice == 0:
-                    self.events['INT_EVNT'] += 1
-                    kill_self = self.update_clock("INT")
-                elif choice == 1:
-                    self.events['SND_EVNT'] += 1
-                    kill_self = self.update_clock("SND")
-                    # print("Message sent by process", self.t_id, "Clock increased: ", self.clock)
-                    connection = pika.BlockingConnection(pika.ConnectionParameters("localhost"))
-                    channel = connection.channel()
-                    p_id = self.t_id
-                    while p_id == self.t_id:
-                        if PROCESSES:
-                            p_id = PROCESSES[randint(0, len(PROCESSES)-1)].t_id
-                        elif len(PROCESSES) <= 1:
-                            self.kill()
-                    queue = channel.queue_declare(str(randint(1,NUM_PROC)))
-                    channel.basic_publish(body = json.dumps({"clock": self.clock}), routing_key = str(self.t_id), exchange = '')
-                    connection.close()
-                # sleep(randint(1, 4)/10)
-            self.kill()
-        except Exception:
-            self.kill()
-            print(self.t_id, "Crashed.")
-            # print(traceback.format_exc())
 
     def kill(self):
         try:
-            self.channel.basic_cancel(self.consumer_tag)
-            del PROCESSES[PROCESSES.index(self)]
+            print(self.events)
             filename = "_".join(["Process", str(self.t_id), "data"]) + ".json"
             with open(filename, "w+") as f:
                 f.write(json.dumps({"growth":self.clock_growth, "events": self.events}))
+            return
         except Exception:
             print(traceback.format_exc())
 
 
-    def initiate_send_events(self):
-        try:
-            thread = Thread(target=self.send_message)
-            thread.start()
-        except Exception:
-            print(traceback.format_exc())
+
+def send_message(K, t_id):
+    try:
+        global KILLED_NODES
+        i = 0
+        kill_self = False
+        global SENDERS
+        while SENDERS[t_id] is False:
+            choice = randint(0,1)
+            p_id, ext_process = PROCESSES[randint(0, len(PROCESSES)-1)].t_id, PROCESSES[randint(0, len(PROCESSES)-1)]
+
+            own_proc = None
+            for item in PROCESSES:
+                if item.t_id == t_id:
+                    own_proc = item
+                    break
+            if choice == 0:
+                own_proc.events['INT_EVNT'] += 1
+                own_proc.update_clock("INT")
+            elif choice > 0:
+                own_proc.events['SND_EVNT'] += 1
+                own_proc.update_clock("SND")
+                ext_process.queue.put(int(own_proc.clock))
+            i += 1
+        print(t_id, "sender killed.") 
+    except Exception:
+        print('\n',traceback.format_exc())
 
 
 if __name__ == '__main__':
@@ -154,8 +154,14 @@ if __name__ == '__main__':
             num += 1
 
         for item in range(NUM_PROC):
-            thread = Process(item, primes[item])
+            thread = Proc(item, primes[item])
             PROCESSES.append(thread)
-            thread.start()
+            thread = Process(target = send_message, args = (4,item))
+            SENDERS2.append(thread)
+            SENDERS.append(False)
+        
+        for it ,item in enumerate(PROCESSES):
+            item.start()
+            SENDERS2[it].start()
     except Exception:
         print(traceback.format_exc())
