@@ -10,6 +10,7 @@ from multiprocessing import Queue, Process, Lock
 from threading import Thread
 from random import randint
 from time import sleep
+from numpy.random import choice
 
 
 def EVC(t_id, q, prime, max_size):
@@ -41,7 +42,6 @@ def EVC(t_id, q, prime, max_size):
                 while True:
                     event = q[t_id].get()
                     if int(clock).bit_length() > max_size*32 or event["type"] == 'STOP':
-                        print(t_id, "stopping")
                         for item in q:
                             item.put({
                                 "type": "STOP"
@@ -74,7 +74,7 @@ def EVC(t_id, q, prime, max_size):
                         events['clock'].append(clock)
                 print(events)
                 events['id'] = t_id
-                with open('data_'+str(t_id)+'.json', 'w+') as f:
+                with open('part1/data_' + str(N) + '_' +str(t_id)+'.json', 'w+') as f:
                     f.write(json.dumps(events))
                 
             except Exception:
@@ -86,7 +86,8 @@ def EVC(t_id, q, prime, max_size):
                 mode = 0
                 while True:
                     sleep(0.05)
-                    if mode%3 == 0:
+                    mode = choice([0,1], p=[0.25, 0.75])
+                    if mode == 0:
                         q[t_id].put({
                             'type': "INT"
                         })
@@ -108,20 +109,23 @@ def EVC(t_id, q, prime, max_size):
 
 if __name__ == '__main__':
     try:
-        N = int(sys.argv[1])
-        qu = [Queue() for _ in range(N)]
-        primes = []
-        num = 2
-        while len(primes) < N:
-            prime = True
-            for i in range(2,num):
-                if (num%i==0):
-                    prime = False
-            if prime:
-                primes.append(num)
-            num += 1
-        for _ in range(N):
-            p = Process(target = EVC, args = ((_, qu, primes[_], N)))
-            p.start()
+        # N = int(sys.argv[1])
+        for N in range(28, 31, 4):
+            print("N", N)
+            qu = [Queue() for _ in range(N)]
+            primes = []
+            num = 2
+            while len(primes) < N:
+                prime = True
+                for i in range(2,num):
+                    if (num%i==0):
+                        prime = False
+                if prime:
+                    primes.append(num)
+                num += 1
+            for _ in range(N):
+                p = Process(target = EVC, args = ((_, qu, primes[_], N)))
+                p.start()
+            sleep(10)
     except Exception:
         print(traceback.format_exc())
